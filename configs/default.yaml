@@ -1,0 +1,109 @@
+run_name: gkx_full
+seed: 42
+tuning_n_jobs: 4
+
+checkpoint:
+  resume: true
+
+data:
+  # Prepared stock-month panel: merge the characteristic data with macro predictors,
+  # construct the next-month excess-return target, and retain raw lagged market equity.
+  path: data/processed/gkx_panel.parquet
+  date_col: date
+  id_col: permno
+  target_col: ret_excess
+  # Use true lagged market equity for value weighting. This column may also appear
+  # in characteristic_columns; it is not silently excluded from the model design.
+  market_cap_col: mve
+  # Total stock return used only in the GKX turnover drift formula.
+  return_col: ret
+  min_valid_market_cap_fraction: 0.01
+  file_glob: "**/*"
+  downcast_float32: true
+
+features:
+  # For raw GKX-style inputs, interact mode performs the paper's monthly
+  # cross-sectional rank transform and monthly median imputation before creating
+  # 94 x (constant + 8 macro) features and SIC2 dummies.
+  mode: interact
+  characteristic_columns: null  # REQUIRED: explicitly list the 94 characteristics
+  macro_columns: [macro_dp, macro_ep, macro_bm, macro_ntis, macro_tbl, macro_tms, macro_dfy, macro_svar]
+  industry_code_col: sic2
+  industry_values: null          # inferred from the initial pre-test sample unless supplied
+  expected_num_characteristics: 94
+  expected_num_macros: 8
+  expected_num_industries: 74
+  expected_num_features: 920
+  fill_missing_monthly_median: true
+  drop_missing_industry: true
+
+split:
+  train_start: 1957-01-01
+  initial_train_end: 1974-12-31
+  initial_validation_start: 1975-01-01
+  initial_validation_end: 1986-12-31
+  test_start: 1987-01-01
+  test_end: 2016-12-31
+  refit_frequency: yearly
+
+models:
+  names: [ols, ols3, enet_huber, pcr, pls, glm, rf, gbrt_huber, nn1, nn2, nn3, nn4, nn5]
+  ols_huber_quantile: 0.999
+  ols_eta0: 0.001
+  ols_max_iter: 5000
+  ols3_features: [mvel1, bm, mom12m]
+  ols3_huber_quantile: 0.999
+  ols3_eta0: 0.001
+  ols3_max_iter: 5000
+  enet_huber:
+    # sklearn SGD alpha is not the paper's lambda. This broader implementation
+    # grid is tuned on the validation sample; see README Fidelity notes.
+    sklearn_alpha: [0.0000001, 0.000001, 0.00001, 0.0001, 0.001, 0.01]
+    paper_rho: 0.5
+    huber_quantile: 0.999
+    eta0: 0.001
+    max_iter: 5000
+  pcr:
+    n_components: [5, 10, 20, 30, 40, 50]
+  pls:
+    n_components: [1, 2, 3, 5, 10]
+  glm:
+    n_knots: 3
+    # The 920-predictor spline expansion is transformed/scaled/trained in row chunks.
+    transform_batch_size: 4096
+    streaming_epochs: 5
+    sklearn_alpha: [0.0000001, 0.000001, 0.00001, 0.0001, 0.001, 0.01]
+    paper_rho: 0.5
+    huber_quantile: 0.999
+    eta0: 0.001
+  rf:
+    n_estimators: 300
+    max_depth: [1, 2, 3, 4, 5, 6]
+    max_features: [3, 5, 10, 20, 30, 50]
+    min_samples_leaf: 1
+    forest_n_jobs: -1
+  gbrt_huber:
+    n_estimators: [1, 10, 50, 100, 300, 500, 1000]
+    learning_rate: [0.01, 0.1]
+    max_depth: [1, 2]
+    min_samples_leaf: 1
+    huber_quantile: 0.999
+  neural_net:
+    epochs: 100
+    batch_size: 10000
+    inference_batch_size: 65536
+    learning_rate: [0.001, 0.01]
+    l1_lambda: [0.00001, 0.0001, 0.001]
+    patience: 5
+    # Small final-layer initialization keeps untrained predictions near zero even
+    # when hidden BatchNorm activations have unit variance.
+    output_init_scale: 0.01
+    seeds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    device: auto
+
+evaluation:
+  top_bottom_n: 1000
+  annualization: 12
+  portfolio_bins: 10
+  newey_west_lags: 6
+  save_predictions: true

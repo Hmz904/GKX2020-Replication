@@ -1,0 +1,38 @@
+run_name: synthetic_smoke
+seed: 42
+tuning_n_jobs: 1
+checkpoint: {resume: true}
+data:
+  path: data/processed/synthetic.csv
+  date_col: date
+  id_col: id
+  target_col: ret_excess
+  market_cap_col: mve
+  return_col: ret_total
+  min_valid_market_cap_fraction: 0.01
+  downcast_float32: true
+features:
+  mode: prebuilt
+  columns: [x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15, x16, x17, x18, x19]
+  expected_num_features: 20
+split:
+  train_start: 2000-01-01
+  initial_train_end: 2004-12-31
+  initial_validation_start: 2005-01-01
+  initial_validation_end: 2006-12-31
+  test_start: 2007-01-01
+  test_end: 2009-12-31
+  refit_frequency: yearly
+models:
+  names: [ols, ols3, enet_huber, pcr, pls, glm, rf, gbrt_huber, nn1]
+  ols_huber_quantile: 0.999
+  ols3_features: [x0, x1, x2]
+  ols3_huber_quantile: 0.999
+  enet_huber: {sklearn_alpha: [0.0001], paper_rho: 0.5, huber_quantile: 0.999, eta0: 0.001}
+  pcr: {n_components: [2, 5]}
+  pls: {n_components: [1, 2]}
+  glm: {n_knots: 3, transform_batch_size: 128, streaming_epochs: 3, sklearn_alpha: [0.0001], paper_rho: 0.5, huber_quantile: 0.999, eta0: 0.001}
+  rf: {n_estimators: 30, max_depth: [2], max_features: [5], min_samples_leaf: 1, forest_n_jobs: 1}
+  gbrt_huber: {n_estimators: [30], learning_rate: [0.1], max_depth: [1], min_samples_leaf: 1, huber_quantile: 0.999}
+  neural_net: {epochs: 5, batch_size: 512, inference_batch_size: 1024, learning_rate: [0.001], l1_lambda: [0.0001], patience: 2, output_init_scale: 0.01, seeds: [1], device: cpu}
+evaluation: {top_bottom_n: 100, annualization: 12, portfolio_bins: 10, newey_west_lags: 3, save_predictions: true}

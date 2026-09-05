@@ -53,6 +53,25 @@ def _scaled_sgd(**kwargs):
     )
 
 
+def _divergence_reference(yv):
+    """MSE of the zero predictor, i.e. the denominator of the GKX out-of-sample R^2."""
+    return max(float(np.mean(np.asarray(yv, dtype=float) ** 2)), 1e-30)
+
+
+def _is_diverged(result, yv, factor):
+    """True when a fitted candidate is numerically broken rather than merely poor.
+
+    Fixed-step SGD on real characteristic distributions can diverge at small alpha: the
+    coefficients blow up and validation MSE exceeds the zero-predictor benchmark by many
+    orders of magnitude. Taking argmin over such a grid still returns a model, so the
+    failure propagates silently into the results table as an absurd negative R^2 rather
+    than as an error. Grid points that fail this check are excluded from selection.
+    """
+    if not np.isfinite(result.val_mse):
+        return True
+    return result.val_mse > factor * _divergence_reference(yv)
+
+
 def fit_ols(
     Xtr,
     ytr,
@@ -134,7 +153,26 @@ def fit_enet_huber(cfg, Xtr, ytr, Xv, yv, seed=42, n_jobs=1):
             delayed(_fit_enet_candidate)(cfg, alpha, Xtr, ytr, Xv, yv, seed)
             for alpha in alphas
         )
-    return min(results, key=lambda result: result.val_mse)
+    factor = float(cfg.get("divergence_factor", 100.0))
+    usable = [r for r in results if not _is_diverged(r, yv, factor)]
+    n_diverged = len(results) - len(usable)
+    if not usable:
+        raise RuntimeError(
+            f"All {len(results)} elastic-net grid points diverged: validation MSE exceeded "
+            f"{factor}x the zero-predictor benchmark ({_divergence_reference(yv):.6g}). "
+            "Lower models.enet_huber.eta0 or drop the smallest sklearn_alpha values."
+        )
+    best = min(usable, key=lambda result: result.val_mse)
+    if n_diverged:
+        warnings.warn(
+            f"{n_diverged} of {len(results)} elastic-net grid points diverged and were "
+            "excluded from selection.",
+            UserWarning,
+            stacklevel=2,
+        )
+    best.diagnostics["n_diverged_grid_points"] = n_diverged
+    best.diagnostics["divergence_reference_mse"] = _divergence_reference(yv)
+    return best
 
 
 def fit_pcr(cfg, Xtr, ytr, Xv, yv, seed=42, n_jobs=1):

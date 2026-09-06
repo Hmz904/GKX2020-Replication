@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-
+from sklearn.base import clone
 import numpy as np
 from joblib import Parallel, delayed
 from sklearn.cross_decomposition import PLSRegression
@@ -347,27 +347,80 @@ def fit_rf(cfg, Xtr, ytr, Xv, yv, seed=42, tuning_n_jobs=1):
 
 
 def fit_gbrt(cfg, Xtr, ytr, Xv, yv, seed=42, tuning_n_jobs=1):
-    estimator = GradientBoostingRegressor(
-        loss="huber",
-        alpha=cfg.get("huber_quantile", 0.999),
-        random_state=seed,
-    )
-    result = tune(
-        estimator,
-        {
-            "n_estimators": cfg["n_estimators"],
-            "learning_rate": cfg["learning_rate"],
-            "max_depth": cfg["max_depth"],
-            "min_samples_leaf": [cfg.get("min_samples_leaf", 1)],
-        },
-        Xtr,
-        ytr,
-        Xv,
-        yv,
-        n_jobs=tuning_n_jobs,
-    )
+    """Tune GBRT over the n_estimators grid without refitting for each grid point.
+ 
+    A gradient boosting model with N trees contains every model with fewer trees as
+    a prefix, so `staged_predict` recovers the validation prediction at each grid
+    point from a single fit at max(n_estimators). Predictions are bit-identical to
+    fitting each grid point separately; only the wasted refits are removed.
+    """
+    n_estimators_grid = sorted(set(int(n) for n in cfg["n_estimators"]))
+    max_trees = n_estimators_grid[-1]
+    learning_rates = cfg["learning_rate"]
+    max_depths = cfg["max_depth"]
+    min_samples_leaf = cfg.get("min_samples_leaf", 1)
+    quantile = cfg.get("huber_quantile", 0.999)
+ 
+    yv_arr = np.asarray(yv, dtype=float).ravel()
+    wanted = set(n_estimators_grid)
+ 
+    def run_combo(learning_rate, max_depth):
+        model = GradientBoostingRegressor(
+            loss="huber",
+            alpha=quantile,
+            random_state=seed,
+            n_estimators=max_trees,
+            learning_rate=learning_rate,
+            max_depth=max_depth,
+            min_samples_leaf=min_samples_leaf,
+        )
+        model.fit(Xtr, ytr)
+        # staged_predict yields the prediction after 1, 2, ... max_trees stages.
+        local = None
+        for stage, pred in enumerate(model.staged_predict(Xv), start=1):
+            if stage not in wanted:
+                continue
+            mse = float(np.mean((yv_arr - np.asarray(pred).ravel()) ** 2))
+            if local is None or mse < local[0]:
+                local = (
+                    mse,
+                    stage,
+                    {
+                        "n_estimators": stage,
+                        "learning_rate": learning_rate,
+                        "max_depth": max_depth,
+                        "min_samples_leaf": min_samples_leaf,
+                    },
+                    model,
+                )
+        return local
+ 
+    combos = [(lr, d) for lr in learning_rates for d in max_depths]
+    fit_n_jobs = int(cfg.get("fit_n_jobs", 1))
+    if fit_n_jobs == 1:
+        found = [run_combo(lr, d) for lr, d in combos]
+    else:
+        # Threads only: sklearn's tree builder releases the GIL, and threads avoid
+        # the process-spawn path that hangs on Windows.
+        found = Parallel(n_jobs=fit_n_jobs, prefer="threads")(
+            delayed(run_combo)(lr, d) for lr, d in combos
+        )
+ 
+    val_mse, n_selected, params, full_model = min(found, key=lambda item: item[0])
+ 
+    # Truncate the retained model to the selected number of stages so that later
+    # .predict() calls use exactly the tuned configuration.
+    selected = clone(full_model).set_params(n_estimators=n_selected)
+    selected.__dict__.update(full_model.__dict__)
+    selected.estimators_ = full_model.estimators_[:n_selected]
+    selected.n_estimators = n_selected
+    selected.n_estimators_ = n_selected
+    if getattr(full_model, "train_score_", None) is not None:
+        selected.train_score_ = full_model.train_score_[:n_selected]
+ 
+    result = FitResult(selected, params, val_mse)
     residual = np.abs(np.asarray(ytr) - result.model.predict(Xtr))
-    cutoff = float(np.quantile(residual, cfg.get("huber_quantile", 0.999)))
+    cutoff = float(np.quantile(residual, quantile))
     result.diagnostics.update(
         {
             "huber_cutoff": cutoff,

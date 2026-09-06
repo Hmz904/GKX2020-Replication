@@ -12,3 +12,6 @@ outputs/*
 *.pt
 *.joblib
 .DS_Store
+
+logs/
+*.egg-info/

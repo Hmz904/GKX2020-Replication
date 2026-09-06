@@ -22,9 +22,10 @@ IMPORTANT DEVIATION FROM GU-KELLY-XIU (2020)
   Any R^2 produced from this panel is NOT comparable to the paper's 0.40%.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
-from pathlib import Path
 
 # ----------------------------------------------------------------------------
 # Configuration

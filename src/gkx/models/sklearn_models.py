@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import warnings
-from sklearn.base import clone
+
 import numpy as np
 from joblib import Parallel, delayed
+from sklearn.base import clone
 from sklearn.cross_decomposition import PLSRegression
 from sklearn.decomposition import PCA
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
@@ -348,7 +349,7 @@ def fit_rf(cfg, Xtr, ytr, Xv, yv, seed=42, tuning_n_jobs=1):
 
 def fit_gbrt(cfg, Xtr, ytr, Xv, yv, seed=42, tuning_n_jobs=1):
     """Tune GBRT over the n_estimators grid without refitting for each grid point.
- 
+
     A gradient boosting model with N trees contains every model with fewer trees as
     a prefix, so `staged_predict` recovers the validation prediction at each grid
     point from a single fit at max(n_estimators). Predictions are bit-identical to
@@ -360,10 +361,10 @@ def fit_gbrt(cfg, Xtr, ytr, Xv, yv, seed=42, tuning_n_jobs=1):
     max_depths = cfg["max_depth"]
     min_samples_leaf = cfg.get("min_samples_leaf", 1)
     quantile = cfg.get("huber_quantile", 0.999)
- 
+
     yv_arr = np.asarray(yv, dtype=float).ravel()
     wanted = set(n_estimators_grid)
- 
+
     def run_combo(learning_rate, max_depth):
         model = GradientBoostingRegressor(
             loss="huber",
@@ -394,7 +395,7 @@ def fit_gbrt(cfg, Xtr, ytr, Xv, yv, seed=42, tuning_n_jobs=1):
                     model,
                 )
         return local
- 
+
     combos = [(lr, d) for lr in learning_rates for d in max_depths]
     fit_n_jobs = int(cfg.get("fit_n_jobs", 1))
     if fit_n_jobs == 1:
@@ -405,9 +406,9 @@ def fit_gbrt(cfg, Xtr, ytr, Xv, yv, seed=42, tuning_n_jobs=1):
         found = Parallel(n_jobs=fit_n_jobs, prefer="threads")(
             delayed(run_combo)(lr, d) for lr, d in combos
         )
- 
+
     val_mse, n_selected, params, full_model = min(found, key=lambda item: item[0])
- 
+
     # Truncate the retained model to the selected number of stages so that later
     # .predict() calls use exactly the tuned configuration.
     selected = clone(full_model).set_params(n_estimators=n_selected)
@@ -417,7 +418,7 @@ def fit_gbrt(cfg, Xtr, ytr, Xv, yv, seed=42, tuning_n_jobs=1):
     selected.n_estimators_ = n_selected
     if getattr(full_model, "train_score_", None) is not None:
         selected.train_score_ = full_model.train_score_[:n_selected]
- 
+
     result = FitResult(selected, params, val_mse)
     residual = np.abs(np.asarray(ytr) - result.model.predict(Xtr))
     cutoff = float(np.quantile(residual, quantile))

@@ -15,3 +15,7 @@ outputs/*
 
 logs/
 *.egg-info/
+
+dist/
+*.egg-info/
+.Rhistory

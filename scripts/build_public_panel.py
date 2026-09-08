@@ -339,7 +339,8 @@ models:
     device: auto
 
 evaluation:
-  top_bottom_n: 1000
+  # Cross-section is ~90 names/month; 1000 would select every stock into both groups.
+  top_bottom_n: 30
   annualization: 12
   portfolio_bins: 10
   newey_west_lags: 6

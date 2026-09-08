@@ -51,7 +51,8 @@ first row an error rather than a result.
 
 ## 2. Full horse race, and the cost of an unregularised design
 
-Reference run, all 13 models, test years 2011-2015 (n = 5,521):
+Reference run, all 13 models, test years 2011-2015 (n = 5,521). **This ranking is not stable
+— see §12**, which reruns the same panel over thirteen test years and reorders almost all of it:
 
 | model | OOS R² (all) | top 30 | bottom 30 |
 |---|---|---|---|
@@ -81,9 +82,18 @@ results:
 
 Everything else is indistinguishable. In particular the top two models, `enet_huber` and
 `rf`, differ by **t = −0.054, p = 0.957**. On this sample the claim "trees beat linear models"
-is **not supported**; they tie. The size split points the right way — `rf` earns +0.419% on the
+is **not supported**.
+
+**Corrected by §12.4.** An independent test on 14,653 observations gives t = −0.89, p = 0.372 —
+still insignificant, but with the two models now 1.66 percentage points apart rather than 0.008.
+Read together, the two tests show **insufficient power, not equivalence**. The word "tie" was
+wrong: p = 0.957 measures the test's inability to separate them, not their similarity. The size split points the right way — `rf` earns +0.419% on the
 largest 30 names against −0.238% on the smallest, and `enet_huber` +0.287% against −0.076% —
 which is the direction GKX report, but 1,770 observations cannot carry that claim.
+
+§12.3 revisits this with 2.65x the data: on 2003-2015 excluding 2008, `rf` earns **+1.046 %** on
+the largest 30 and **+0.837 %** on the smallest, both positive, direction unchanged. That is a
+stronger version of the same finding, subject to the ex-post exclusion documented there.
 
 ### The one result the sample size does support
 
@@ -310,6 +320,159 @@ optimisation and has not been made.
 
 ---
 
+## 12. Thirteen test years: what more data changed, and what it did not
+
+The reference run tests on 2011-2015 (n = 5,521), and §2 concludes that almost nothing in it is
+statistically distinguishable. The obvious remedy is more test observations. Widening the
+cross-section was measured and rejected (§12.4); lengthening the test window was run instead.
+
+### 12.1 The run
+
+`configs/subsample_long.yaml`, run name `gkx_subsample_long`. The same 298-name panel, with
+the rolling window moved back as a block:
+
+| | reference run | long run |
+|---|---|---|
+| train | 1995-2005 | 1995-2000 |
+| validation | 2006-2010 (5 years) | 2001-2002 (2 years) |
+| test | 2011-2015 | 2003-2015 |
+| test observations | 5,521 | **14,653** |
+| wall clock | — | 8 h 22 m |
+
+**This changes two things at once**, and that has to be said before any result is read: the test
+window lengthened *and* the validation window shrank from five years to two. Starting the test in
+2001 instead was rejected — it would leave the first refit with roughly three years of training
+data against 892 columns, and §2's dose-response result says unregularised fits at that width and
+that sample size produce noise, which would lower the power the run exists to raise.
+
+Full-sample OOS R², both runs:
+
+| model | 2011-2015 (n=5,521) | 2003-2015 (n=14,653) |
+|---|---:|---:|
+| nn5 | −0.397 % | **+0.264 %** |
+| glm | −0.262 % | **+0.254 %** |
+| ols3 | −0.055 % | +0.015 % |
+| nn2 | −0.290 % | −0.086 % |
+| nn3 | −0.248 % | −0.118 % |
+| nn4 | −0.466 % | −0.166 % |
+| enet_huber | **+0.050 %** | −0.022 % |
+| pcr | −0.140 % | −0.279 % |
+| gbrt_huber | −0.131 % | −0.399 % |
+| pls | −0.641 % | −0.581 % |
+| nn1 | −0.185 % | −0.997 % |
+| rf | **+0.042 %** | **−1.679 %** |
+| ols | −24.96 % | −44.07 % |
+
+Almost no ordering survives. That is the first result: **the reference run's ranking was not
+stable.** The rest of this section separates why.
+
+### 12.2 Validation length, isolated
+
+Both runs predict the same 2011-2015 observations. Restricting the long run to those months gives
+a controlled comparison in which the test data, the target and the features are identical and
+**only the validation window differs**:
+
+| model | 5-year validation | 2-year validation | delta |
+|---|---:|---:|---:|
+| glm | −0.262 % | **+0.301 %** | +0.563 |
+| enet_huber | +0.050 % | **+0.282 %** | +0.232 |
+| ols3 | −0.055 % | +0.130 % | +0.185 |
+| pcr | −0.140 % | −0.041 % | +0.099 |
+| pls | −0.641 % | −0.400 % | +0.241 |
+| ols | −24.96 % | −12.62 % | +12.34 |
+| nn4 | −0.466 % | −0.511 % | −0.045 |
+| nn3 | −0.248 % | −0.561 % | −0.313 |
+| nn5 | −0.397 % | −0.611 % | −0.214 |
+| nn2 | −0.290 % | −0.786 % | −0.496 |
+| **rf** | **+0.042 %** | **−0.063 %** | −0.105 |
+| **gbrt_huber** | −0.131 % | **−0.794 %** | −0.663 |
+| nn1 | −0.185 % | −1.074 % | −0.889 |
+
+n = 5,521 in both columns, confirmed identical.
+
+The sign of the change **sorts by model family**. Every linear and regularised-linear model
+improves; both tree models and the networks get worse. Two mechanisms move in opposite
+directions here and the split is consistent with both acting: shortening validation hands three
+extra years (2008-2010, the crisis included) to training, which helps models that want data, and
+it removes three years from the sample used to pick hyperparameters, which hurts models whose
+selection is already unstable — §7 shows both tree models pinned to the minimum of their grids.
+
+Whatever the mechanism, the operational conclusion stands on its own: **the length of the
+hyperparameter-selection window is a first-order design choice, not a detail**, and its effect is
+large enough to reverse the sign of several models' R². GKX fix this window by convention; this
+repository now has a measured reason to report it as a deviation whenever it is changed.
+
+### 12.3 The pooled R² is a crisis-year statistic
+
+`rf` falls from +0.042 % to −1.679 %, the worst move in the table. Year by year it is not a
+decline at all:
+
+| year | 2003 | 2004 | 2005 | 2006 | 2007 | 2008 | 2009 | 2010 | 2011 | 2012 | 2013 | 2014 | 2015 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| rf | +1.68 | +1.05 | −0.21 | −0.14 | −2.47 | **−17.89** | +2.56 | +1.65 | +0.43 | −0.23 | +1.65 | −0.71 | −1.17 |
+| enet_huber | +0.51 | +1.03 | −0.25 | −0.10 | −2.75 | −3.36 | +1.41 | +1.50 | +0.03 | +0.51 | +2.31 | −0.33 | −0.68 |
+| glm | +5.53 | −1.44 | +0.14 | −0.28 | −1.57 | −5.13 | +1.50 | +1.73 | −0.08 | +0.49 | +3.37 | −1.05 | −0.67 |
+| ols | −43.62 | −52.09 | −35.14 | −48.77 | −77.18 | **−148.91** | −18.09 | −8.96 | −19.93 | −15.94 | −9.69 | −13.54 | −4.79 |
+
+2008 contributes **13.45 %** of the denominator (the largest year is 2009 at 20.24 %), and it
+carries the entire negative result:
+
+| `rf` sample | OOS R² |
+|---|---:|
+| 2003-2015, all | −1.679 % |
+| **2003-2015 excluding 2008** | **+0.841 %** |
+| — excluding 2008, largest 30 by market cap | **+1.046 %** |
+| — excluding 2008, smallest 30 | **+0.837 %** |
+
+Excluding one year of thirteen moves `rf` from twelfth place to first, and its size split turns
+positive on both halves while keeping the direction GKX report. **Dropping 2008 is an ex-post
+choice and the full-sample number remains the headline**; the point is not that `rf` is really
+the best model, it is that a single pooled R² over a window containing a crisis compresses two
+strong and opposite signals — best-in-class in twelve normal years, catastrophic in one — into a
+number that describes neither. The per-year table is not a robustness appendix here; it is the
+result.
+
+This also explains the low power against `rf` noted in §12.4: its loss series is dominated by
+two tail years pointing opposite ways (2008 at −17.89 %, 2009 at +2.56 %), which inflates the
+variance the Diebold-Mariano statistic divides by.
+
+### 12.4 The comparison the extra data was supposed to settle, and did not
+
+`enet_huber` vs `rf` was the motivating pair. Two independent tests:
+
+| test sample | observations | t | p | R² gap |
+|---|---:|---:|---:|---:|
+| 2011-2015 | 5,521 | −0.054 | 0.957 | 0.008 pp |
+| 2003-2015 | 14,653 | −0.89 | 0.372 | 1.66 pp |
+
+Still not significant with 2.65x the data — but the point estimates are no longer close. §2 reads
+the first row as "they tie"; with the second row in hand, the defensible reading of both is
+**insufficient power**, not equivalence. §2 has been corrected accordingly.
+
+What the extra observations did buy is a family of results invisible at n = 5,521: **network depth
+now separates**. `nn1` is significantly worse than `nn2` (p = 0.0033), `nn4` (p = 0.034),
+`nn5` (p = 0.0008) and `ols3` (p = 0.028), and `nn2` is worse than `nn5` (p = 0.0049). None
+of these pairs was distinguishable in the reference run. Significant pairs rise from 15 to 19 of
+78; `ols` remains worse than all twelve but its t-statistics fall from 5.85-6.82 to 2.70-3.05.
+
+### 12.5 Compute cost is anisotropic
+
+The two ways of adding rows do not cost the same. Doubling the cross-section was calibrated
+directly (599 names, gbrt only, 2015 only, `configs/subsample_calib600.yaml`); lengthening the
+series was measured from the long run's own per-year timestamps:
+
+| direction | rows | time | exponent |
+|---|---|---|---:|
+| wider cross-section | 26,543 → 54,909 (2.07x) | 35.9 → 169.1 min (4.71x) | **2.13** |
+| longer series | 9,120 → 12,932 training rows (1.42x) | 20.2 → 30.1 min (1.49x) | **1.14** |
+
+Both are `gbrt_huber`, the model that accounts for roughly 76 % of a year's compute. Adding
+months is close to linear; adding names is close to quadratic. The practical consequence is that
+the originally planned 1000-name run was projected at 60-80 hours on this hardware and abandoned,
+while the thirteen-year run cost 8 h 22 m — and the exponent measured in one direction must not be
+used to budget the other, which is how the 1000-name plan survived as long as it did.
+
+---
 ## 11. Open
 
 The stress generator's docstring claims ~85% of signal variance is unrepresentable by the
@@ -329,5 +492,12 @@ Until the generator is corrected, **do not assert "nonlinear beats linear" in CI
 assertions that hold today are: all models beat zero on the planted signal, OLS is clearly
 worst, and RF/NN beat PCR/PLS.
 
-The reference run does not settle this either: `rf` and `enet_huber` are statistically tied
-(§2). Distinguishing them needs a larger cross-section, which is the next planned run.
+The reference run does not settle this either: `rf` and `enet_huber` are indistinguishable
+in it (§2). The plan recorded here was to distinguish them with a larger cross-section. That plan
+was measured and abandoned: a calibration run put a 1000-name panel at 60-80 hours on this
+hardware (§12.5). Thirteen test years were run instead, at 2.65x the observations for 8 h 22 m,
+and the pair is **still** not separated (t = −0.89, p = 0.372, §12.4) — though the two are no
+longer close in point estimate, and `rf`'s loss series turns out to be dominated by two opposing
+crisis-era years (§12.3), which is a concrete reason the test has so little power against it.
+Separating them is therefore still open, and more test observations alone are not obviously the
+route.

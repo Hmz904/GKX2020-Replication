@@ -6,8 +6,8 @@ Independent Python replication framework for Gu, Kelly, and Xiu (2020), *The Rev
 
 ## What running it on real data actually found
 
-The framework has been executed end to end on a public-data panel. Three findings came out of
-that run and are documented in full in [`FINDINGS.md`](FINDINGS.md):
+The framework has been executed end to end on a public-data panel. Four findings came out of
+those runs and are documented in full in [`FINDINGS.md`](FINDINGS.md):
 
 **A linear model that passed synthetic stress testing diverged on real data.** `enet_huber`
 scored the best of all models (+2.287% OOS R²) on a 920-predictor synthetic panel, then
@@ -27,12 +27,28 @@ every commit.
 hyperparameter combinations, one test year drops from 69.5 to 26.6 minutes with a maximum
 prediction difference of **exactly 0.0**.
 
+**A single pooled R² can describe neither of the two things it averages.** Extending the test
+window to thirteen years moves `rf` from second place to twelfth (+0.042% to −1.679%). Year by
+year it is not a decline: `rf` is among the best models in twelve of thirteen years and loses
+**−17.89%** in 2008 alone, which carries 13.45% of the denominator. Excluding that one year puts
+`rf` first at **+0.841%**. Dropping 2008 is an ex-post choice and the full-sample number stays
+the headline — the point is that one pooled statistic over a window containing a crisis compresses
+best-in-class and catastrophic into a number that is neither.
+
 ## Reference run
 
 298 permnos sampled at random from the public characteristic datashare, 1995–2015,
 26,410 firm-months, 892-column interact design (94 × 9 + 46 industry dummies), expanding
 window, test years 2011–2015 (n = 5,521, roughly 88 names per monthly cross-section).
 Built by `scripts/build_public_panel.py`, configured by `configs/subsample.yaml`.
+
+**This ranking is not stable.** A second run over thirteen test years (2003–2015, n = 14,653,
+`configs/subsample_long.yaml`, 8 h 22 m) reorders almost all of it — `nn5` and `glm` move to
+the top, `rf` to twelfth. §12 of [`FINDINGS.md`](FINDINGS.md) separates the causes: part is
+the crisis year described above, and part is that the second run also shortened the validation
+window from five years to two, which turns out to shift results **by model family** — every linear
+model improves, both tree models and the networks get worse. The length of the
+hyperparameter-selection window is a first-order design choice here, not a detail.
 
 | model | OOS R² | | model | OOS R² |
 |---|---:|---|---|---:|
@@ -46,8 +62,12 @@ Built by `scripts/build_public_panel.py`, configured by `configs/subsample.yaml`
 
 Of 78 model pairs, modified Diebold–Mariano finds exactly two significant families: `ols` is
 worse than all twelve alternatives (t between 5.85 and 6.82), and `pls` is worse than
-`enet_huber`, `ols3` and `rf`. **The top two models are statistically tied**
+`enet_huber`, `ols3` and `rf`. The top two models are **not separated** by the test
 (t = −0.054, p = 0.957), so "trees beat linear models" is not supported at this sample size.
+A second, independent test on 14,653 observations gives t = −0.89, p = 0.372 — still
+insignificant, but with the two models 1.66 percentage points apart rather than 0.008. Read
+together the two tests show **insufficient power, not equivalence**; an earlier version of this
+README called it a tie, which was wrong.
 
 The one result the sample size does support is the cost of an unregularized design. Holding
 the pipeline fixed and widening the predictor set:
@@ -60,11 +80,11 @@ the pipeline fixed and widening the predictor set:
 Both tree models independently select the *least* flexible configuration in their grid —
 random forest at `max_depth=1`, `max_features=3`; gradient boosting at `n_estimators=1` in
 four years out of five. At 88 names per cross-section, model capacity is almost purely a
-liability, which is consistent with the linear/tree tie above.
+liability, which is consistent with the failure to separate linear from tree models above.
 
 **No R² here is comparable to the paper's 0.40%.** The target is reconstructed from public
 data with no delisting adjustment, the cross-section is 88 names rather than thousands, and
-there are five test years rather than thirty. Every deviation is enumerated in
+there are five test years rather than thirty — thirteen in the longer run, still far short. Every deviation is enumerated in
 [`FINDINGS.md`](FINDINGS.md), which also records, in place, the earlier conclusions this run
 overturned.
 

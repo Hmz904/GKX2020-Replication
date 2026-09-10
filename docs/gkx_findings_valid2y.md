@@ -133,13 +133,12 @@ run was designed.
 +0.537%, nn4 +0.528%, nn2 +0.367%, nn5 +0.257%, against −0.248%, −0.466%, −0.290% and −0.397% in
 the baseline. nn1 does not join them (−0.942%).
 
-This is not explained. Two readings are available and the run does not distinguish them: the
-values are all within a few tenths of a percent, which is the scale at which this panel carries no
-resolution; or a 6-year training window with 2-year validation triggers early stopping soon enough
-to avoid overfitting that hurts these models in the longer-training configurations.
-Diebold–Mariano tests have not been run on this configuration, so no significance is claimed. It
-should not be cited as a result until it is either reproduced across more seeds or supported by a
-significant DM pair.
+Diebold–Mariano tests give the neural nets nominal support: nn2–nn5 beat glm, nn1 and pls at
+p < 0.05, and nn3/nn4 beat rf at p < 0.05, with signs matching the R² ordering. The support does
+not survive correction for multiple comparisons — 78 pairs are tested, the Bonferroni threshold is
+6.4e-4, and only the ols-involving pairs clear it. nn2–nn5 are also not significantly better than
+the middle of the table (enet_huber, ols3, gbrt_huber). The reading is that the four nets are
+distinguishable from the *worst* models in this configuration, not that they are good.
 
 ## Step 3: extending the test window
 

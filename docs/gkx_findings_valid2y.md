@@ -1,145 +1,186 @@
-# Attributing the 2003–2015 reordering: the `valid2y` control run
+# Attributing the 2003–2015 reordering: a three-run decomposition
 
-## Why this run exists
+## Why these runs exist
 
-`gkx_subsample_long` (train 1995–2000, validation 2001–2002, test 2003–2015) produced a
-ranking almost unrelated to the `gkx_subsample` baseline: nn5 +0.264% and glm +0.254% at the
-top, enet_huber down to −0.022%, and rf collapsing from +0.042% to −1.679%.
+`gkx_subsample_long` (train 1995–2000, validation 2001–2002, test 2003–2015) produced a ranking
+almost unrelated to the `gkx_subsample` baseline: nn5 +0.264% and glm +0.254% at the top,
+enet_huber down to −0.022%, and rf collapsing from +0.042% to −1.679%.
 
 That run changed three things at once relative to the baseline:
 
-1. the test window (2011–2015 → 2003–2015),
-2. the total pre-test span (16 years → 8 years),
-3. the split of that span between training and validation (11y/5y → 6y/2y).
+1. the split of the pre-test span between training and validation (11y/5y → 6y/2y),
+2. the length of the training window (11y → 6y, and with it the pre-test span, 16y → 8y),
+3. the test window (2011–2015 → 2003–2015).
 
-With three simultaneous changes, none of the reordering was attributable. `gkx_subsample_valid2y`
-isolates the third.
+With three simultaneous changes, none of the reordering was attributable. Two control runs turn
+this into a chain in which each step moves exactly one of them.
 
 ## Design
 
-| | train | validation | test | pre-test span |
+| run | train | validation | test | pre-test span |
 |---|---|---|---|---|
 | `gkx_subsample` (baseline) | 1995–2005 (11y) | 2006–2010 (5y) | 2011–2015 | 16y |
 | `gkx_subsample_valid2y` | 1995–2008 (14y) | 2009–2010 (2y) | 2011–2015 | 16y |
+| `gkx_subsample_span8y` | 1995–2000 (6y) | 2001–2002 (2y) | 2011–2015 | 8y |
+| `gkx_subsample_long` | 1995–2000 (6y) | 2001–2002 (2y) | 2003–2015 | 8y |
 
-The test window and the total pre-test span are held fixed. The only change is **where the
-train/validation boundary falls** — three years are moved from validation into training.
+Each consecutive pair differs in one respect:
 
-This is worth stating precisely, because it is not a pure "shorter validation" experiment: the
-same edit that shortens validation also lengthens training. The two effects are separated below
-using the selected hyperparameters, not by assumption.
+- **baseline → valid2y**: the train/validation boundary moves; the pre-test span is fixed at 16
+  years. Three years are reallocated from validation into training, so this step simultaneously
+  lengthens training and shortens validation. The two effects are separated below using the
+  selected hyperparameters rather than by assumption.
+- **valid2y → span8y**: the training window shortens from 14 to 6 years with validation held at
+  2 years. Test window unchanged.
+- **span8y → long**: the test window extends from 2011–2015 to 2003–2015. Training and validation
+  windows are identical.
 
-Runtime 4h02m on the machine in the environment notes; `gbrt_huber` alone accounted for 77–78%
-of each test year (31m57s of 41m18s in 2011, rising to ~41m of ~53m by 2015).
+## Out-of-sample R² (%), `sample = all`
 
-## Results, `sample = all` (out-of-sample R², %)
-
-| model | 11y/5y | 14y/2y | Δ |
+| model | baseline 11y/5y | valid2y 14y/2y | span8y 6y/2y |
 |---|---:|---:|---:|
-| enet_huber | +0.0497 | +0.2824 | **+0.2327** |
-| rf | +0.0422 | −0.0633 | −0.1055 |
-| ols3 | −0.0553 | +0.1298 | +0.1850 |
-| gbrt_huber | −0.1311 | −0.7935 | **−0.6624** |
-| pcr | −0.1397 | −0.0405 | +0.0991 |
-| nn1 | −0.1849 | −1.0735 | **−0.8886** |
-| nn3 | −0.2482 | −0.5611 | −0.3129 |
-| glm | −0.2620 | +0.3009 | **+0.5630** |
-| nn2 | −0.2904 | −0.7856 | −0.4952 |
-| nn5 | −0.3970 | −0.6113 | −0.2142 |
-| nn4 | −0.4659 | −0.5112 | −0.0453 |
-| pls | −0.6407 | −0.4000 | +0.2407 |
-| ols | −24.9596 | −12.6209 | +12.3388 |
+| enet_huber | +0.0497 | +0.2824 | −0.1653 |
+| rf | +0.0422 | −0.0633 | −0.2574 |
+| ols3 | −0.0553 | +0.1298 | −0.2817 |
+| gbrt_huber | −0.1311 | −0.7935 | −0.5493 |
+| pcr | −0.1397 | −0.0405 | −0.5178 |
+| nn1 | −0.1849 | −1.0735 | −0.9421 |
+| nn3 | −0.2482 | −0.5611 | **+0.5371** |
+| glm | −0.2620 | +0.3009 | −1.8021 |
+| nn2 | −0.2904 | −0.7856 | **+0.3666** |
+| nn5 | −0.3970 | −0.6113 | **+0.2567** |
+| nn4 | −0.4659 | −0.5112 | **+0.5282** |
+| pls | −0.6407 | −0.4000 | −1.5419 |
+| ols | −24.9596 | −12.6209 | −96.2817 |
 
-The `top_30` and `bottom_30` splits carry the same sign pattern. The largest single move anywhere
-in the table is glm on `top_30`: −0.2583% → +0.7070%, i.e. +0.9653pp.
+`gkx_subsample_long` is not a column here because it is scored on a different, 2.65x larger test
+sample (n_obs 14,653 against 5,521), so its values are not comparable row-by-row against the
+other three. Its reported figures are quoted individually where used.
 
-## The split is not random: it tracks dependence on the validation set
+## Step 1: reallocating three years from validation to training
 
-Every model that consumes the validation set for early stopping or for a non-degenerate
-hyperparameter search got worse. Every model that does not, got better.
+Thirteen models split cleanly by whether they lean on the validation set.
 
 | | models | Δ range |
 |---|---|---|
-| improved | ols, ols3, pcr, pls, glm, enet_huber | +0.10 to +12.34pp |
-| worsened | rf, gbrt_huber, nn1–nn5 | −0.05 to −0.89pp |
+| improved | ols, ols3, pcr, pls, glm, enet_huber | +0.099 to +12.339pp |
+| worsened | rf, gbrt_huber, nn1–nn5 | −0.045 to −0.889pp |
 
-Thirteen models, zero exceptions.
+No exceptions. The largest single move anywhere in the run is glm on `top_30`: −0.2583% →
++0.7070%, i.e. +0.965pp. The `top_30` and `bottom_30` splits carry the same sign pattern as
+`all`.
 
-## Separating the two effects with the selected hyperparameters
-
-`tuning.csv` distinguishes the training-length channel from the tuning channel directly: if a
-model selected identical hyperparameters in both runs, its change can only come from the longer
-training window.
-
-**Unchanged selections — pure training-length effect.**
+**glm and enet_huber isolate the training-length channel exactly.** Both selected identical
+hyperparameters in all five test years of both runs:
 
 ```
-glm          n_knots 3, alpha 0.01, l1_ratio 0.5      identical, all 5 years, both runs
-enet_huber   alpha 0.01, l1_ratio 0.5                 identical, all 5 years, both runs
-rf           max_depth 1, max_features 3              identical, both runs
+glm          n_knots 3, alpha 0.01, l1_ratio 0.5     identical, 5/5 years, both runs
+enet_huber   alpha 0.01, l1_ratio 0.5                identical, 5/5 years, both runs
 ```
 
-glm's +0.563pp on `all` and +0.965pp on `top_30` therefore owe nothing to the validation
-window — the search picked the same point on the grid ten times out of ten. Three extra years of
-training data is the whole story. The same holds for enet_huber (+0.233pp).
+Ten selections each, zero variation. glm's +0.563pp on `all` and +0.965pp on `top_30` therefore
+owe nothing to the validation window; three extra years of training data is the whole story. The
+same holds for enet_huber's +0.233pp.
 
-rf falls in this group too, with the opposite sign: −0.106pp from the longer training window,
-with no tuning channel at all.
-
-**Changed selections — tuning channel active.**
+**gbrt_huber's selections change qualitatively.** Per test year 2011–2015:
 
 ```
-gbrt_huber   11y/5y : lr 0.1,  max_depth 2, n_estimators 1
-             14y/2y : lr 0.01, max_depth 1, n_estimators 300
+baseline 11y/5y   n_estimators   1,   1,   1,   1, 300    depth 2, 1, 2, 1, 1   lr .1, .01, .1, .1, .01
+valid2y  14y/2y   n_estimators   1, 500, 300, 300, 300    depth 1, 1, 1, 1, 1   lr .1, .01, .01, .01, .01
 ```
 
-This is a qualitative flip, not a nudge. Under 5-year validation gbrt selects a single depth-2
-tree — effectively declining to learn. Under 2-year validation it selects 300 depth-1 trees at
-lr 0.01, a conventional boosting configuration. Out-of-sample R² falls 0.66pp. The shorter
-validation set did not push the model toward caution; it pushed it toward training much harder
-and overfitting the validation set. (The runtime confirms the switch is real: gbrt genuinely
-trains 300 trees per fit in this run.)
+Under 5-year validation gbrt selects a single tree in four of five years — effectively declining
+to learn. Under 2-year validation it selects 300–500 trees at lr 0.01 in four of five years, a
+conventional boosting configuration. Out-of-sample R² falls 0.662pp. The shorter validation set
+did not push the model toward caution; it pushed it toward training much harder. The runtime
+confirms the switch is real: gbrt took 77–78% of each test year in the valid2y run (31m57s of
+41m18s in 2011, rising to roughly 41m of 53m by 2015), for a total run time of 4h02m.
+
+**nn1 concentrates on one corner of its grid.**
 
 ```
-nn1   11y/5y : l1 [1e-3, 1e-4, 1e-5, 1e-5, 1e-3]   lr [.01, .01, .001, .001, .001]
-      14y/2y : l1 [1e-3, 1e-4, 1e-3, 1e-3, 1e-3]   lr [.01] x5
-
-nn5   11y/5y : l1 [1e-5] x5                        lr [.01] x5
-      14y/2y : l1 [1e-5, 1e-4, 1e-5, 1e-4, 1e-5]   lr [.01, .001, .01, .01, .01]
+baseline 11y/5y   l1  1e-3, 1e-4, 1e-5, 1e-5, 1e-3    lr .01, .01, .001, .001, .001
+valid2y  14y/2y   l1  1e-3, 1e-4, 1e-3, 1e-3, 1e-3    lr .01 x5
 ```
 
-nn1 collapses onto one corner of the grid (strongest L1, largest learning rate) in four of five
-years, where under 5-year validation it was dispersed. nn5 does the reverse: it was perfectly
-stable and becomes unstable. The out-of-sample damage matches — nn1 is the worst hit of all
-thirteen models (−0.889pp), nn5 the mildest of the neural nets (−0.214pp). Bias in one case,
-variance in the other.
+Four of five years at the strongest L1 and the largest learning rate, where the baseline was
+dispersed across three L1 values and two learning rates. nn1 is the worst-hit model in this step
+at −0.889pp.
 
-## What this says about rf's collapse
+**rf's selections also move**, so its −0.106pp mixes both channels rather than isolating the
+training window:
 
-rf selected the same hyperparameters in both runs, so the split-point reallocation reaches it
-only through the training window, and moves it by **−0.106pp**. In `gkx_subsample_long` rf moved
-by **−1.721pp** (+0.042% → −1.679%).
+```
+baseline 11y/5y   max_depth 1, 1, 1, 1, 5    max_features 3,  3,  3,  3,  3
+valid2y  14y/2y   max_depth 1, 4, 4, 5, 6    max_features 3, 20, 50,  3,  3
+span8y   6y/2y    max_depth 1, 3, 6, 1, 1    max_features 3,  3,  3, 30, 50
+```
 
-At most 6% of that collapse is attributable to the train/validation split point. The remaining
-94% belongs to the other two changes in that run: the test window itself (2003–2010 is eight
-years of out-of-sample period absent from the baseline) and the halving of the total pre-test
-span from 16 years to 8.
+Only the first test year is stable across all three runs. rf's grid selection is sensitive to both
+the validation window and the training window, which is worth recording in its own right: the
+earlier observation that rf "selects minimum grid complexity" describes the baseline's first four
+years and does not generalize across configurations.
 
-The headline of `gkx_subsample_long` should therefore be read as a **test-window** result, not a
-tuning-protocol artefact. That is now supported rather than assumed.
+## Step 2: shortening the training window from 14 to 6 years
 
-## What is still not isolated
+With validation fixed at two years, cutting training from 14 years to 6 moves rf a further
+−0.194pp (−0.063% → −0.257%) and glm −2.103pp (+0.301% → −1.802%). ols falls to −96.28%, which
+confirms directly that six years of training against 892 features is too thin for an unregularized
+linear model — the reason this configuration was rejected as a starting point when the 2003–2015
+run was designed.
 
-This run holds the pre-test span fixed at 16 years. `gkx_subsample_long` has only 8. A further
-control — train 1995–2000, validation 2001–2002, test 2011–2015 — would isolate the effect of
-total pre-test span at a fixed test window, and would complete the decomposition. It is the
-natural next run, at roughly 3h on this machine (shorter training window than the present run).
+**Four of the five neural nets turn positive and occupy the top four places of the table**: nn3
++0.537%, nn4 +0.528%, nn2 +0.367%, nn5 +0.257%, against −0.248%, −0.466%, −0.290% and −0.397% in
+the baseline. nn1 does not join them (−0.942%).
 
-Two caveats on the numbers above:
+This is not explained. Two readings are available and the run does not distinguish them: the
+values are all within a few tenths of a percent, which is the scale at which this panel carries no
+resolution; or a 6-year training window with 2-year validation triggers early stopping soon enough
+to avoid overfitting that hurts these models in the longer-training configurations.
+Diebold–Mariano tests have not been run on this configuration, so no significance is claimed. It
+should not be cited as a result until it is either reproduced across more seeds or supported by a
+significant DM pair.
 
-- Single seeds per configuration for the tree models; the neural nets average three seeds
-  internally. Differences below roughly 0.1pp should not be read as real, which covers nn4
-  (−0.045pp) and arguably rf (−0.106pp).
+## Step 3: extending the test window
+
+Holding training and validation at 1995–2000 and 2001–2002, extending the test window from
+2011–2015 to 2003–2015 takes rf from −0.257% to −1.679%, a further −1.422pp.
+
+## The decomposition
+
+For rf on `sample = all`:
+
+| step | what changes | rf R² | Δ | share of total |
+|---|---|---:|---:|---:|
+| baseline | — | +0.042% | — | — |
+| → valid2y | train/validation boundary, span fixed | −0.063% | −0.106pp | 6.1% |
+| → span8y | training window 14y → 6y | −0.257% | −0.194pp | 11.3% |
+| → long | test window 2011–15 → 2003–15 | −1.679% | −1.422pp | **82.6%** |
+| total | | | −1.721pp | 100% |
+
+**The test window accounts for roughly five sixths of rf's collapse.** The headline of
+`gkx_subsample_long` is a statement about the 2003–2010 out-of-sample period, not about the tuning
+protocol.
+
+Two limits on how far this table can be pushed:
+
+- The steps telescope, so the shares summing to 100% is arithmetic, not a validation of the
+  decomposition.
+- The shares are path-dependent. A different ordering of the same three changes would attribute
+  different amounts to each, because the effects need not be additive. The ordering here was
+  chosen so that each step is a single, nameable edit; it is not the only defensible one.
+
+## Caveats
+
+- Tree models use a single seed per configuration; the neural nets average three seeds internally.
+  Differences below roughly 0.1pp should not be read as real, which covers nn4's −0.045pp in step
+  1 and arguably rf's −0.106pp.
 - The return target is reconstructed (`mom1m` shifted −1), so the absolute R² levels are not
-  comparable to the published table. Only the differences between runs, which share the target,
-  are being interpreted here.
+  comparable to the published table. Only differences between runs, which share the target, are
+  interpreted here.
+- Steps 1 and 3 each isolate a single edit. In step 2 the training window and the pre-test span
+  change together, since validation is held fixed — in this design they are the same edit and
+  cannot be separated without a further run.
+- `r2_oos.csv` is keyed by `(model, sample)` with `sample` in `{all, top_30, bottom_30}`;
+  comparisons across runs must merge on both keys. Merging on `model` alone silently aligns rows
+  by position across the three samples.

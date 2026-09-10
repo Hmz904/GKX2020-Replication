@@ -502,30 +502,38 @@ crisis-era years (§12.3), which is a concrete reason the test has so little pow
 Separating them is therefore still open, and more test observations alone are not obviously the
 route.
 
-## The 2003–2015 reordering is a test-window result, not a tuning artefact
+## The 2003–2015 reordering is a test-window result
 
-`gkx_subsample_long` changed three things at once relative to the baseline — test window, total
-pre-test span, and the train/validation split of that span — so its dramatic reordering (nn5 and
-glm to the top, rf collapsing from +0.042% to −1.679%) was not attributable to any of them.
+`gkx_subsample_long` changed three things at once relative to the baseline — the train/validation
+split, the training-window length, and the test window — so its dramatic reordering (nn5 and glm
+to the top, rf collapsing from +0.042% to −1.679%) was not attributable to any of them.
 
-`gkx_subsample_valid2y` isolates the third: same test window, same 16-year pre-test span, but the
-train/validation boundary moved from 11y/5y to 14y/2y. Result: thirteen models split cleanly by
-whether they consume the validation set. Everything that uses it for early stopping or a
-non-degenerate hyperparameter search got worse (nn1 −0.889pp, gbrt −0.662pp, nn2 −0.495pp);
-everything that does not got better (glm +0.563pp, enet_huber +0.233pp, ols3 +0.185pp). No
-exceptions.
+Two control runs turn this into a chain in which each step moves exactly one:
 
-`tuning.csv` separates the two channels without assumption. glm, enet_huber and rf selected
-identical hyperparameters in both runs, so their changes are pure training-length effects — glm's
+| step | what changes | rf R² | Δ | share |
+|---|---|---:|---:|---:|
+| `gkx_subsample` | baseline, train 11y / valid 5y / test 2011–15 | +0.042% | — | — |
+| → `gkx_subsample_valid2y` | train/validation boundary, pre-test span fixed at 16y | −0.063% | −0.106pp | 6.1% |
+| → `gkx_subsample_span8y` | training window 14y → 6y, validation fixed at 2y | −0.257% | −0.194pp | 11.3% |
+| → `gkx_subsample_long` | test window 2011–15 → 2003–15 | −1.679% | −1.422pp | **82.6%** |
+
+**The test window accounts for roughly five sixths of the collapse.** `gkx_subsample_long` is a
+statement about the 2003–2010 out-of-sample period, not about the tuning protocol. The steps
+telescope, so the shares summing to 100% is arithmetic rather than a check, and they are
+path-dependent: a different ordering of the same three edits would apportion them differently.
+
+Step 1 also produces a clean split across all thirteen models. Everything that leans on the
+validation set for early stopping or a non-degenerate grid got worse (nn1 −0.889pp, gbrt
+−0.662pp, nn2 −0.495pp); everything else got better (glm +0.563pp, enet_huber +0.233pp, ols3
++0.185pp). No exceptions.
+
+Only glm and enet_huber isolate the training-length channel cleanly — both selected identical
+hyperparameters in all five test years of both runs, ten fits each with zero variation, so glm's
 +0.965pp on `top_30` owes nothing to the validation window. gbrt flipped qualitatively
-(n_estimators 1 → 300, max_depth 2 → 1, lr 0.1 → 0.01): a shorter validation set pushed it to
-train harder and overfit, not to be more cautious.
+(n_estimators 1 → 300–500 in four of five years, lr 0.1 → 0.01): a shorter validation set pushed
+it to train harder and overfit, not to be more cautious. rf's selections move across all three
+runs, with only the first test year stable, so its −0.106pp mixes both channels and no step
+isolates a pure training-length effect for it.
 
-rf's selection was unchanged, so the split-point reallocation reaches it only through the training
-window and moves it by −0.106pp against the −1.721pp collapse in `gkx_subsample_long`. At most 6%
-of that collapse is attributable to the tuning protocol; the rest belongs to the test window and
-to the halving of the pre-test span.
-
-Full decomposition, tables and caveats: [docs/gkx_findings_valid2y.md](docs/gkx_findings_valid2y.md).
-Still open: a train 1995–2000 / validation 2001–2002 / test 2011–2015 run would isolate the
-pre-test span at a fixed test window and close the decomposition (~3h).
+Full decomposition, per-year hyperparameter tables and caveats:
+[docs/gkx_findings_valid2y.md](docs/gkx_findings_valid2y.md).

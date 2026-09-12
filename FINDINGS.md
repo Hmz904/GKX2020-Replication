@@ -472,8 +472,65 @@ the originally planned 1000-name run was projected at 60-80 hours on this hardwa
 while the thirteen-year run cost 8 h 22 m — and the exponent measured in one direction must not be
 used to budget the other, which is how the 1000-name plan survived as long as it did.
 
+### 12.6 The same anisotropy holds across models, and it decided against a min189 run
+ 
+§12.5 measures cost in the two directions of adding rows. A third direction is across models in
+the same run, and on a wide panel it is the largest of the three.
+ 
+The min189 panel (3,032 permnos, 714,042 firm-months, 914 features) was built for the sibling
+GKX2021 repository. Before committing this pipeline to it, a single-point probe measured the unit
+cost of each model: one test year, one value on every grid axis, all 13 models, everything else
+unchanged (`configs/min189_probe.yaml`, derived from `configs/min189.yaml` by
+`scripts/make_probe_config.py`; train 373,202 / validation 181,115 / test 35,104).
+ 
+Total 1 h 52 m:
+ 
+| model | probe time | share |
+|---|---:|---:|
+| **gbrt_huber** | **5,432 s** | **81%** |
+| glm | 667 s | 10% |
+| enet_huber | 171 s | 2.5% |
+| ols | 83 s | 1.2% |
+| nn1–nn5 | 54–75 s each | 4.4% |
+| rf | 37 s | 0.6% |
+| pls / pcr / ols3 | 12 / 2 / 1 s | <0.1% |
+ 
+`gbrt_huber`'s 81% is consistent with the ~76% measured on the narrow panel in §12.5, so that
+share is stable under a 13× change in rows. What the wide panel adds is the comparison against
+`rf`: **147× between the two tree ensembles in the same run.** `rf` scans only `max_features: 20`
+columns per split and runs on 20 threads via `forest_n_jobs: -1`; sklearn's GBRT does exact split
+finding across all 914 columns, single-threaded. Width is nearly free for one and quadratic for
+the other. Budgeting from a total-time figure scaled by one multiplier is wrong by orders of
+magnitude here, for the same reason §12.5 gives about the row directions.
+ 
+Extrapolated per model over each grid and five test years, everything except `gbrt_huber` is about
+**16 hours**; `gbrt_huber` alone is about **300**. (`n_estimators` does not multiply the fit count
+— `staged_predict` reads every point on that axis off a single fit to the largest value — but it
+multiplies the fit cost, and the probe fit 100 trees against the grid's 1,000.)
+ 
+**§7's cap does not rescue this.** That section retired a planned cap at 500 on the grounds that
+1,000 was never selected. Re-counting across all five earlier runs confirms it and adds the rest of
+the distribution: of 29 gbrt selections, `n_estimators` = 1 was chosen 14 times, 10 twice, 50 four
+times, 300 seven times, 500 twice, **1,000 never**. Removing only the unsupported 1,000 halves the
+cost to ~150 hours. Capping at 100 would bring it to ~30, but it would bind in roughly a third of
+fits, which is a new deviation rather than a correction.
+ 
+There is also a reason not to carry §7's reading across at all. Its conclusion is that at ~88 names
+per cross-section, capacity is almost purely a liability. min189 has ~3,011 names per
+cross-section. More data ordinarily supports more capacity, so the selection pattern that justified
+small grids is the one least safe to extrapolate to this panel.
+ 
+**Decision: the pipeline is not run on min189.** The panel exists to make the GKX2021
+managed-portfolio geometry interpretable. This repository's results — the horse race, the
+Diebold-Mariano tests, the 2008-exclusion finding, the anisotropy in §12.5 — are established on the
+298-name panel, and no open question here is waiting on a wider one. Spending 46 to 300 hours to
+restate them at a different width is not a good use of the machine. The probe is kept as the
+result: three measurements of anisotropy now exist, at 2.13 across the cross-section, 1.14 along
+time, and 147× between two models in one run.
+ 
+ 
 ---
-## 11. Open
+## 13. Open
 
 The stress generator's docstring claims ~85% of signal variance is unrepresentable by the
 920-column linear design, and therefore that trees and networks should win. **They do not**: on

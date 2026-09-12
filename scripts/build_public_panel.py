@@ -5,8 +5,36 @@ Inputs
   datashare.csv      Xiu's characteristic datashare (permno, DATE, 94 chars, sic2)
   Data2025.xlsx      Goyal-Welch-Zafirov predictor data, sheet "Monthly"
 
-Output
-  subsample_panel.parquet
+Outputs
+  <--out>            the stock-month panel (100 columns, pre-Kronecker)
+  <--config>         a matching GKX2020 run config, unless --no-config
+  <--artifact-out>   the CA artifact + manifest, when --emit-artifact is passed
+
+THIS PANEL IS PRE-KRONECKER
+  The 892/905-column characteristic x macro expansion is NOT written here. It is
+  formed at load time by the GKX2020 pipeline when features.mode == interact. The
+  file on disk always holds the 94 raw characteristics, so the CA artifact is a
+  column subset of this panel, never a reconstruction of one.
+
+SELECTION RULE (see --min-months)
+  Two rules are available and they are NOT interchangeable.
+
+  random (default)   Draw --n-permno permnos uniformly from the whole in-window
+                     universe, with no condition on how long each one survives.
+                     This is the survivorship-neutral rule: a permno delisted in
+                     1998 is as likely to be drawn as one alive throughout. The
+                     cost is width -- an unrestricted draw of 300 names yields
+                     only ~88 per monthly cross-section, because the draws do not
+                     overlap in time.
+
+  --min-months N     Keep only permnos observed in at least N months of the
+                     window. This buys width (>=189 months gives 3,032 permnos and
+                     a median cross-section of ~3,012) by conditioning on survival,
+                     which is exactly the bias the random rule avoids. Anything
+                     built this way carries a survivorship deviation and must be
+                     documented as such; it is defensible for factor-structure work
+                     (CA/IPCA loadings, regularization behaviour) and NOT for
+                     return predictability claims.
 
 IMPORTANT DEVIATION FROM GU-KELLY-XIU (2020)
   datashare.csv contains no realized returns. The target here is reconstructed by
@@ -22,27 +50,77 @@ IMPORTANT DEVIATION FROM GU-KELLY-XIU (2020)
   Any R^2 produced from this panel is NOT comparable to the paper's 0.40%.
 """
 
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import subprocess
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-# ----------------------------------------------------------------------------
-# Configuration
-# ----------------------------------------------------------------------------
-DATASHARE = Path(r"D:\Google Download\GKX2020\datashare.csv")
-MACRO_XLSX = Path(r"D:\hms\Data2025.xlsx")
-OUT_PATH = Path(r"D:\projects\gkx\data\processed\subsample_panel.parquet")
-CONFIG_PATH = Path(r"D:\projects\gkx\configs\subsample.yaml")
-PANEL_REL = "data/processed/subsample_panel.parquet"
+REPO_ROOT = Path(r"D:\projects\gkx")
 
-START_YYYYMM = 199501
-END_YYYYMM = 201512
-N_PERMNO = 300
-SEED = 20260905
-CHUNKSIZE = 500_000
+parser = argparse.ArgumentParser(description=__doc__.splitlines()[1])
+parser.add_argument("--datashare", default=r"D:\Google Download\GKX2020\datashare.csv")
+parser.add_argument("--macro-xlsx", default=r"D:\hms\Data2025.xlsx")
+parser.add_argument("--out", default=str(REPO_ROOT / r"data\processed\subsample_panel.parquet"))
+parser.add_argument("--panel-rel", default=None,
+                    help="path the config uses to address the panel; derived from --out by default")
+parser.add_argument("--config", default=str(REPO_ROOT / r"configs\subsample.yaml"))
+parser.add_argument("--no-config", action="store_true",
+                    help="skip the run config; use for panels too wide for the GKX2020 pipeline")
+parser.add_argument("--run-name", default="gkx_subsample")
+parser.add_argument("--n-permno", type=int, default=None,
+                    help="how many permnos to draw; defaults to 300 when --min-months is absent")
+parser.add_argument("--min-months", type=int, default=None,
+                    help="keep only permnos observed at least this many months (survivorship-conditioned)")
+parser.add_argument("--seed", type=int, default=20260905)
+parser.add_argument("--start", type=int, default=199501)
+parser.add_argument("--end", type=int, default=201512)
+parser.add_argument("--chunksize", type=int, default=500_000)
+parser.add_argument("--top-bottom-n", type=int, default=None,
+                    help="long/short leg size for evaluation; defaults to 10%% of the median cross-section")
+parser.add_argument("--emit-artifact", action="store_true",
+                    help="also write the CA artifact via the authoritative branch path")
+parser.add_argument("--artifact-out",
+                    default=r"D:\projects\Autoencoder\data\processed\gkx_ca_panel_branch.parquet")
+parser.add_argument("--artifact-manifest",
+                    default=r"D:\projects\Autoencoder\data\processed\gkx_ca_panel_branch.manifest.json")
+parser.add_argument("--exporter", default=r"D:\projects\Autoencoder\tools\gkx-side\export_ca_panel.py")
+parser.add_argument("--source-version", default=None,
+                    help="recorded in the artifact manifest; defaults to this repo's short git SHA")
+args = parser.parse_args()
+
+DATASHARE = Path(args.datashare)
+MACRO_XLSX = Path(args.macro_xlsx)
+OUT_PATH = Path(args.out)
+CONFIG_PATH = Path(args.config)
+START_YYYYMM = args.start
+END_YYYYMM = args.end
+CHUNKSIZE = args.chunksize
+SEED = args.seed
+
+# Neither flag given => the historical default: 300 names, no history condition.
+N_PERMNO = args.n_permno
+MIN_MONTHS = args.min_months
+if N_PERMNO is None and MIN_MONTHS is None:
+    N_PERMNO = 300
+
+if args.panel_rel is not None:
+    PANEL_REL = args.panel_rel
+else:
+    try:
+        PANEL_REL = OUT_PATH.relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        PANEL_REL = OUT_PATH.as_posix()
 
 ID_COLS = ["permno", "DATE", "sic2"]
+
+MACRO_SRC = ["d/p", "e/p", "b/m", "ntis", "tbl", "tms", "dfy", "svar"]
+MACRO_OUT = ["macro_dp", "macro_ep", "macro_bm", "macro_ntis",
+             "macro_tbl", "macro_tms", "macro_dfy", "macro_svar"]
 
 
 def shift_month_forward(yyyymm):
@@ -51,9 +129,25 @@ def shift_month_forward(yyyymm):
     return np.where(m == 12, (y + 1) * 100 + 1, yyyymm + 1)
 
 
-MACRO_SRC = ["d/p", "e/p", "b/m", "ntis", "tbl", "tms", "dfy", "svar"]
-MACRO_OUT = ["macro_dp", "macro_ep", "macro_bm", "macro_ntis",
-             "macro_tbl", "macro_tms", "macro_dfy", "macro_svar"]
+# Load the CA exporter BEFORE the 3.6GB read, so a bad --exporter path fails in
+# seconds rather than after the whole build.
+exporter = None
+if args.emit_artifact:
+    spec = importlib.util.spec_from_file_location("export_ca_panel", args.exporter)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"cannot load exporter module from {args.exporter}")
+    exporter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(exporter)
+    print(f"loaded CA exporter from {args.exporter}", flush=True)
+
+source_version = args.source_version
+if source_version is None:
+    try:
+        source_version = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=str(REPO_ROOT), text=True
+        ).strip()
+    except Exception:
+        source_version = "unknown"
 
 # ----------------------------------------------------------------------------
 # Pass 1: read only the id columns to build the permno universe
@@ -68,22 +162,32 @@ universe = np.sort(ids["permno"].unique())
 print(f"  rows in window: {len(ids):,}")
 print(f"  permnos in window: {len(universe):,}")
 
-# Random sample over the WHOLE universe. Deliberately NOT filtered on history
-# length: selecting long-lived permnos would inject survivorship bias.
-rng = np.random.default_rng(SEED)
-if len(universe) <= N_PERMNO:
-    keep = set(universe.tolist())
-else:
-    keep = set(rng.choice(universe, size=N_PERMNO, replace=False).tolist())
-print(f"  sampled permnos: {len(keep)}")
+months_all = ids.groupby("permno")["yyyymm"].nunique()
 
-months_per_permno = ids[ids["permno"].isin(keep)].groupby("permno").size()
-print(f"  months per sampled permno: min={months_per_permno.min()} "
+if MIN_MONTHS is None:
+    eligible = universe
+    selection_rule = f"random draw of {N_PERMNO} from the full universe, no history condition"
+else:
+    eligible = np.sort(months_all.index[months_all >= MIN_MONTHS].to_numpy())
+    selection_rule = f"permnos observed in >= {MIN_MONTHS} of {ids['yyyymm'].nunique()} months"
+    print(f"  permnos with >= {MIN_MONTHS} months: {len(eligible):,}")
+
+rng = np.random.default_rng(SEED)
+if N_PERMNO is None or len(eligible) <= N_PERMNO:
+    keep = set(eligible.tolist())
+else:
+    keep = set(rng.choice(eligible, size=N_PERMNO, replace=False).tolist())
+    selection_rule += f", then a random draw of {N_PERMNO}"
+print(f"  selection rule: {selection_rule}")
+print(f"  selected permnos: {len(keep):,}")
+
+months_per_permno = months_all.loc[sorted(keep)]
+print(f"  months per selected permno: min={months_per_permno.min()} "
       f"median={int(months_per_permno.median())} max={months_per_permno.max()}")
 del ids
 
 # ----------------------------------------------------------------------------
-# Pass 2: stream the full file, keeping only the sampled permnos
+# Pass 2: stream the full file, keeping only the selected permnos
 # ----------------------------------------------------------------------------
 print("pass 2: reading characteristics ...", flush=True)
 parts = []
@@ -101,6 +205,9 @@ panel = pd.concat(parts, ignore_index=True)
 del parts
 print(f"  panel rows: {len(panel):,}")
 
+# Order matters: char_cols must stay in datashare column order, because the CA
+# artifact manifest records this list verbatim and `export_ca_panel.py verify`
+# compares the two lists for equality.
 char_cols = [c for c in panel.columns if c not in ID_COLS]
 print(f"  characteristic columns: {len(char_cols)}")
 assert len(char_cols) == 94, f"expected 94 characteristics, found {len(char_cols)}"
@@ -137,6 +244,18 @@ for y, r in by_year.items():
 panel = panel[~dropped].reset_index(drop=True)
 print(f"  rows kept: {len(panel):,} of {n_before:,}")
 
+# mvel1 in this datashare is market equity as a LEVEL in $thousands (median ~2.1e5,
+# min ~8.9, max ~5.1e8), not log size, despite what the datashare README says. It is
+# therefore usable directly as the value-weight column. Do NOT exponentiate: the CA
+# exporters only check that the weight column is positive and is not one of the 94
+# ranked names, so a wrong transform here passes every downstream guard silently.
+me = panel["mvel1"].astype("float64")
+assert me.notna().any(), "mvel1 is entirely missing"
+assert (me.dropna() > 0).all(), "mvel1 must be a strictly positive level to weight by"
+assert me.median() > 1e3, (
+    f"mvel1 median is {me.median():.4g}; expected a market-equity LEVEL in $thousands. "
+    "If this column is log size, weighting by it is meaningless -- fix before exporting."
+)
 panel["mve"] = panel["mvel1"]
 
 # ----------------------------------------------------------------------------
@@ -218,18 +337,63 @@ for c in out.columns:
 OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 out.to_parquet(OUT_PATH, index=False)
 
+monthly_n = out.groupby("yyyymm")["permno"].nunique()
+n_ind = int(out["sic2"].nunique())
+n_permno_actual = int(out["permno"].nunique())
+
 print()
 print(f"wrote {OUT_PATH}")
-print(f"  rows      : {len(out):,}")
-print(f"  permnos   : {out['permno'].nunique()}")
-print(f"  months    : {out['yyyymm'].nunique()}")
-print(f"  sic2 codes: {out['sic2'].nunique()}")
-print(f"  columns   : {len(out.columns)}")
+print(f"  rows        : {len(out):,}")
+print(f"  permnos     : {n_permno_actual:,}")
+print(f"  months      : {out['yyyymm'].nunique()}")
+print(f"  sic2 codes  : {n_ind}")
+print(f"  columns     : {len(out.columns)}")
+print(f"  monthly N   : min={monthly_n.min()} median={int(monthly_n.median())} max={monthly_n.max()}")
+print(f"  N/P (P=95)  : min={monthly_n.min() / 95:.1f} median={monthly_n.median() / 95:.1f}")
 print()
 print("SET THESE IN YOUR CONFIG:")
-print(f"  expected_num_industries: {out['sic2'].nunique()}")
-print(f"  expected_num_features: {94 * 9 + out['sic2'].nunique()}")
+print(f"  expected_num_industries: {n_ind}")
+print(f"  expected_num_features: {94 * 9 + n_ind}")
 
+# ----------------------------------------------------------------------------
+# Emit the CA artifact (branch path)
+# ----------------------------------------------------------------------------
+# This is the authoritative path described in export_ca_panel.py: hand the frame
+# to the exporter while the raw characteristics are still present, rather than
+# recovering them afterwards from an expanded panel. The column set and order
+# match what scripts/export_gkx_ca_artifact.py produced, so the two artifacts can
+# be compared with `export_ca_panel.py verify`.
+if args.emit_artifact:
+    print()
+    print("emitting CA artifact (branch path) ...", flush=True)
+    _, manifest = exporter.emit_from_prekronecker(
+        out,
+        char_cols,
+        args.artifact_out,
+        args.artifact_manifest,
+        target_provenance="reconstructed_from_mom1m_shift_-1",
+        source_version=source_version,
+        id_col="permno",
+        month_col="yyyymm",
+        return_col="ret_excess",
+        value_weight_col="mve",
+        value_weight_provenance="lagged market equity level from GKX build",
+        industry_col="sic2",
+        extra_columns=("ret",),
+        source_panel=str(OUT_PATH),
+        build_path="branch",
+    )
+    print(f"  rows / months / assets : {manifest['rows']:,} / {manifest['months']}"
+          f" / {manifest['assets']:,}")
+    print(f"  monthly N min/med/max  : {manifest['monthly_n_min']}"
+          f" / {manifest['monthly_n_median']} / {manifest['monthly_n_max']}")
+    print(f"  N/P min / median       : {manifest['n_over_p_min']:.2f}"
+          f" / {manifest['n_over_p_median']:.2f}")
+    print(f"  noise ceiling (max)    : {manifest['noise_projection_ceiling_max']:.3f}")
+    if manifest["n_over_p_min"] < 20:
+        print("  WARNING: N/P below 20 -- total R2 is diagnostic only on this panel")
+    print(f"  {args.artifact_out}")
+    print(f"  {args.artifact_manifest}")
 
 # ----------------------------------------------------------------------------
 # Emit a matching run config
@@ -237,13 +401,28 @@ print(f"  expected_num_features: {94 * 9 + out['sic2'].nunique()}")
 # The 94 characteristic names and the realized industry count are only known once
 # the panel exists, and the pipeline refuses to infer either. Writing the config
 # here keeps the two in lockstep.
-n_ind = int(out["sic2"].nunique())
-char_yaml = "\n".join(f"    - {c}" for c in char_cols)
+if args.no_config:
+    print()
+    print("skipped the run config (--no-config)")
+else:
+    # The long/short legs have to scale with the cross-section: 30 was chosen when
+    # a month held ~88 names. On a panel of a few thousand, fixed legs of 30 would
+    # be a different experiment, not the same one at a new width.
+    top_bottom = args.top_bottom_n
+    if top_bottom is None:
+        top_bottom = max(30, int(round(0.10 * monthly_n.median())))
+    if 2 * top_bottom > monthly_n.min():
+        print(f"  WARNING: top_bottom_n={top_bottom} exceeds half the smallest "
+              f"cross-section ({monthly_n.min()}); legs will overlap in thin months")
 
-config = f"""# Generated by scripts/build_public_panel.py -- do not hand-edit the feature block.
-# Public-data subsample: {N_PERMNO} permnos, {START_YYYYMM} to {END_YYYYMM}.
+    char_yaml = "\n".join(f"    - {c}" for c in char_cols)
+
+    config = f"""# Generated by scripts/build_public_panel.py -- do not hand-edit the feature block.
+# Public-data subsample: {n_permno_actual} permnos, {START_YYYYMM} to {END_YYYYMM}.
+# Selection rule: {selection_rule}.
+# Monthly cross-section: min {monthly_n.min()}, median {int(monthly_n.median())}, max {monthly_n.max()}.
 # The target is reconstructed from mom1m and is NOT the CRSP return used by GKX.
-run_name: gkx_subsample
+run_name: {args.run_name}
 seed: {SEED}
 # Windows: joblib silently deadlocks when tuning_n_jobs > 1 (9h, no traceback). Keep at 1.
 tuning_n_jobs: 1
@@ -339,14 +518,15 @@ models:
     device: auto
 
 evaluation:
-  # Cross-section is ~90 names/month; 1000 would select every stock into both groups.
-  top_bottom_n: 30
+  # Legs sized at ~10% of the median cross-section ({int(monthly_n.median())} names).
+  top_bottom_n: {top_bottom}
   annualization: 12
   portfolio_bins: 10
   newey_west_lags: 6
   save_predictions: true
 """
 
-CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-CONFIG_PATH.write_text(config, encoding="utf-8")
-print(f"wrote {CONFIG_PATH}")
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(config, encoding="utf-8")
+    print()
+    print(f"wrote {CONFIG_PATH}")
